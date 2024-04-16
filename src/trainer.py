@@ -4,7 +4,8 @@ from typing import Any, Dict, Optional, Union
 import evaluate
 import torch
 from torch.utils.data import DataLoader
-# from tqdm import tqdm
+import wandb
+
 from utils import timer
 
 class Trainer:
@@ -36,8 +37,9 @@ class Trainer:
             train_metrics = self.train(train_dl, i+1)
             print(f"Epoch {i+1}")
             print("Train", train_metrics)
-            eval_metrics = self.evaluate(val_dl)
-            print("Validation:", eval_metrics)
+            val_metrics = self.evaluate(val_dl)
+            print("Validation:", val_metrics)
+            wandb.log({"train": train_metrics, "val": val_metrics, "epoch": i+1})
 
     @timer
     def train(self, train_dl: DataLoader, epoch: int = 0):
@@ -54,7 +56,8 @@ class Trainer:
             self.optimizer.step()
             if self.lr_scheduler:
                 self.lr_scheduler.step()
-            # Update progress for logging
+            # Log and update progress
+            wandb.log({"train": {"batch_loss": loss.item()}}, step=self.step)
             self.step += 1
             if step % self.print_freq == 0:
                 print(f"Epoch {epoch:02}::{step}/{len(train_dl)}: Loss{loss.item()}")

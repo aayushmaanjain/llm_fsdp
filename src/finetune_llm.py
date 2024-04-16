@@ -1,7 +1,7 @@
 """Script to finetune LLM models."""
 from datasets import load_dataset
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import (
@@ -10,6 +10,7 @@ from transformers import (
     DataCollatorForLanguageModeling,
     get_scheduler,
 )
+import wandb
 
 from trainer import Trainer
 
@@ -19,6 +20,14 @@ def main(cfg: DictConfig) -> None:
     """Main function."""
     # Only run for supported models
     assert cfg.model in set(["gpt2", "gpt2-large"]), "Model type not supported."
+
+    # Initialize wandb
+    wandb.init(
+        project="llm-fsdp",
+        entity="aayushmaan",
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
+    wandb.define_metric("epoch")
 
     # Load Model and Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(f"openai-community/{cfg.model}")
@@ -76,6 +85,8 @@ def main(cfg: DictConfig) -> None:
     }
     train_dl = DataLoader(train_dataset, shuffle=True, **dataloader_kwargs)
     val_dl = DataLoader(val_dataset, **dataloader_kwargs)
+    total_train_steps = cfg.epochs * len(train_dl)
+    wandb.run.summary["total_train_steps"] = total_train_steps
 
     # Optimizer and LR Scheduler
     optimizer = AdamW(model.parameters(), lr=cfg.learning_rate)
@@ -83,7 +94,7 @@ def main(cfg: DictConfig) -> None:
         "linear",
         optimizer=optimizer,
         num_warmup_steps=cfg.num_warmup_steps,
-        num_training_steps=cfg.epochs * len(train_dl)
+        num_training_steps=total_train_steps
     )
     trainer = Trainer(model, optimizer, lr_scheduler)
     trainer.training_loop(train_dl, val_dl, cfg.epochs)
