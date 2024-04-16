@@ -1,0 +1,7 @@
+torch
+transformers
+datasets
+evaluate
+scikit-learn
+wandb
+hydra-core
