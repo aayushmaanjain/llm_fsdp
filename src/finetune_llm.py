@@ -14,10 +14,10 @@ from transformers import (
 from trainer import Trainer
 
 
-@hydra.main(config_path="configs", config_name="config.yaml")
+@hydra.main(config_path="../configs", config_name="config.yaml")
 def main(cfg: DictConfig) -> None:
     """Main function."""
-
+    # Only run for supported models
     assert cfg.model in set(["gpt2", "gpt2-large"]), "Model type not supported."
 
     # Load Model and Tokenizer
@@ -72,12 +72,10 @@ def main(cfg: DictConfig) -> None:
     dataloader_kwargs = {
         'batch_size': cfg.batchsize,
         'collate_fn': data_collator,
-        'num_workers': 2,
         'pin_memory': True,
     }
     train_dl = DataLoader(train_dataset, shuffle=True, **dataloader_kwargs)
     val_dl = DataLoader(val_dataset, **dataloader_kwargs)
-
 
     # Optimizer and LR Scheduler
     optimizer = AdamW(model.parameters(), lr=cfg.learning_rate)

@@ -75,9 +75,12 @@ class Trainer:
                 out = self.model(**batch)
                 total_loss += out.loss.item()
                 predictions = torch.argmax(out.logits, dim=-1)
-                accmetric.add_batch(prediction=predictions, reference=batch["labels"])
+                accmetric.add_batch(
+                    prediction=torch.flatten(predictions.type(torch.int32)),
+                    reference=torch.flatten(batch["labels"].type(torch.int32))
+                )
 
         return {
-            "accuracy": accmetric['accuracy'],
+            "accuracy": accmetric.compute()['accuracy'],
             "loss": total_loss / len(val_dl),
         }
