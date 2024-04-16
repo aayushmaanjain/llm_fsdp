@@ -3,4 +3,5 @@ batchsize: 8
 block_factor: 4
 epochs: 2
 learning_rate: 3e-5
+weight_decay: 0.01
 num_warmup_steps: 0

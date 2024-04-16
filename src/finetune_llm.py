@@ -34,6 +34,7 @@ def main(cfg: DictConfig) -> None:
     model = GPT2LMHeadModel.from_pretrained(f"openai-community/{cfg.model}")
     print(model)
     print(f"#parameters = {model.num_parameters() / 1e6} million")
+    wandb.run.summary["parameters"] = model.num_parameters()
 
     # block_size = tokenizer.model_max_length
     block_size = int(tokenizer.model_max_length /
@@ -89,7 +90,7 @@ def main(cfg: DictConfig) -> None:
     wandb.run.summary["total_train_steps"] = total_train_steps
 
     # Optimizer and LR Scheduler
-    optimizer = AdamW(model.parameters(), lr=cfg.learning_rate)
+    optimizer = AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
     lr_scheduler = get_scheduler(
         "linear",
         optimizer=optimizer,
