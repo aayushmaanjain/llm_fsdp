@@ -35,9 +35,11 @@ class Trainer:
                       epochs: int
                       ):
         """Training Loop that runs for desired number of epochs."""
-        # num_training_steps = epochs * len(train_dl)
-        # progress_bar = tqdm(range(num_training_steps))
         self.model = self.model.to(self.device)
+        # Evaluate pretrained model on validation set to set baseline.
+        val_metrics = self.evaluate(val_dl)
+        if self.rank == 0:
+            wandb.log({"val": val_metrics, "epoch": 0})
         for i in range(epochs):
             train_metrics = self.train(train_dl, i+1)
             if self.rank == 0:
