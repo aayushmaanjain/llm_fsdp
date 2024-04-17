@@ -56,8 +56,8 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
         wandb.config.world_size = world_size
 
     # Load Model and Tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(f"openai-community/{cfg.model}")
-    model = GPT2LMHeadModel.from_pretrained(f"openai-community/{cfg.model}")
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model)
+    model = GPT2LMHeadModel.from_pretrained(cfg.model)
     if rank == 0:
         print(model)
         print(f"#parameters = {model.num_parameters() / 1e6} million")
@@ -85,8 +85,7 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
         result["labels"] = result["input_ids"].copy()
         return result
 
-    # TODO change dataset to wikitext-103-v1.
-    dataset = load_dataset("wikitext", "wikitext-2-v1")
+    dataset = load_dataset("wikitext", "wikitext-103-v1")
     if rank == 0:
         print((
             f"Dataset #samples: train={dataset['train'].num_rows},"
@@ -128,6 +127,7 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
             f"Effective batchsize = {per_gpu_batchsize * world_size}"))
         if rank == 0:
             wandb.config.batch_size = per_gpu_batchsize * world_size
+            wandb.config.per_gpu_batchsize = per_gpu_batchsize
 
     dataloader_kwargs = {
         'batch_size': per_gpu_batchsize,

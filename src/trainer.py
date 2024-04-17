@@ -39,7 +39,9 @@ class Trainer:
         # Evaluate pretrained model on validation set to set baseline.
         val_metrics = self.evaluate(val_dl)
         if self.rank == 0:
+            print("Validation baseline:", val_metrics)
             wandb.log({"val": val_metrics, "epoch": 0})
+        # Run training
         for i in range(epochs):
             train_metrics = self.train(train_dl, i+1)
             if self.rank == 0:
