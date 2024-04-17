@@ -44,7 +44,7 @@ class Trainer:
     @timer
     def train(self, train_dl: DataLoader, epoch: int = 0):
         """Trains model for one epoch."""
-        train_loss = 0.
+        train_loss = torch.tensor(0.).to(self.device)
         self.model.train()
         for step, batch in enumerate(train_dl, start=1):
             self.optimizer.zero_grad()
@@ -61,8 +61,8 @@ class Trainer:
             self.step += 1
             if step % self.print_freq == 0:
                 print(f"Epoch {epoch:02}::{step}/{len(train_dl)}: Loss{loss.item()}")
-
-        return {'loss': train_loss / len(train_dl)}
+        train_loss /= len(train_dl)
+        return {'loss': train_loss.item()}
 
     @timer
     def evaluate(self, val_dl: DataLoader):
@@ -70,20 +70,20 @@ class Trainer:
         accmetric = evaluate.load("accuracy", module_type="metric")
         # TODO add perplexity and other metrics?
         # perpmetric = evaluate.load("perplexity", module_type="metric")
-        total_loss = 0.
+        val_loss = torch.tensor(0.).to(self.device)
         self.model.eval()
         with torch.no_grad():
             for batch in val_dl:
                 batch = {k: v.to(self.device) for k, v in batch.items()}
                 out = self.model(**batch)
-                total_loss += out.loss.item()
+                val_loss += out.loss.item()
                 predictions = torch.argmax(out.logits, dim=-1)
                 accmetric.add_batch(
                     predictions=torch.flatten(predictions.type(torch.int32)),
                     references=torch.flatten(batch["labels"].type(torch.int32))
                 )
-
+        val_loss /= len(val_dl)
         return {
             "accuracy": accmetric.compute()['accuracy'],
-            "loss": total_loss / len(val_dl),
+            "loss": val_loss.item(),
         }
