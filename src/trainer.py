@@ -84,8 +84,6 @@ class Trainer:
         # TODO: distributed evaluate metrics? It seems like evaluate implicitly handles
         # distributed evaluation. Revisit later to confirm.
         accmetric = evaluate.load("accuracy", module_type="metric")
-        # TODO add perplexity and other metrics?
-        # perpmetric = evaluate.load("perplexity", module_type="metric")
         val_loss = torch.tensor(0.).to(self.device)
         self.model.eval()
         with torch.no_grad():
@@ -101,7 +99,12 @@ class Trainer:
         val_loss /= len(val_dl)
         if self.world_size > 1:
             dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
+        try:
+            perplexity = torch.exp(val_loss)
+        except OverflowError:
+            perplexity = torch.tensor(float('inf'))
         return {
             "accuracy": accmetric.compute()['accuracy'],
             "loss": val_loss.item(),
+            "perplexity": perplexity.item(),
         }
