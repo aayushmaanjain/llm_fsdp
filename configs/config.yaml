@@ -1,8 +1,9 @@
 model: "gpt2"
-batchsize: 8
-block_factor: 4
+batchsize: 24
+block_factor: 2
 epochs: 2
-learning_rate: 3e-5
-weight_decay: 0.01
+learning_rate: 5e-4
+weight_decay: 0.0
+lr_scheduler: "linear"
 num_warmup_steps: 0
-enable_fsdp: False
+enable_fsdp: True
