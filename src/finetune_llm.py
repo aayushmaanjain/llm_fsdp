@@ -101,8 +101,10 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
     )
     train_dataset = lm_datasets['train']
     val_dataset = lm_datasets['validation']
+    test_dataset = lm_datasets['test']
     if rank == 0:
-        print(f"Dataset size: train={len(train_dataset)}, val: {len(val_dataset)}")
+        print((f"Dataset size: train={len(train_dataset)}, "
+               f"val: {len(val_dataset)}, test: {len(test_dataset)}"))
 
     # Dataloaders
     # NOTE: tokenizer does not have a pad token.
@@ -114,11 +116,12 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
             train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
         val_sampler = DistributedSampler(
             val_dataset, rank=rank, num_replicas=world_size)
+        test_sampler = DistributedSampler(
+            test_dataset, rank=rank, num_replicas=world_size)
         per_gpu_batchsize = cfg.batchsize // world_size
     else:
         dl_shuffle = True
-        train_sampler = None
-        val_sampler = None
+        train_sampler, val_sampler, test_sampler = None, None, None
         per_gpu_batchsize = cfg.batchsize
     # Update effective batchsize.
     if cfg.batchsize % world_size != 0:
@@ -137,6 +140,7 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
     train_dl = DataLoader(train_dataset, shuffle=dl_shuffle,
                           sampler=train_sampler, **dataloader_kwargs)
     val_dl = DataLoader(val_dataset, sampler=val_sampler, **dataloader_kwargs)
+    test_dl = DataLoader(test_dataset, sampler=test_sampler, **dataloader_kwargs)
     total_train_steps = cfg.epochs * len(train_dl)
     if rank == 0:
         wandb.run.summary["total_train_steps"] = total_train_steps
@@ -159,7 +163,9 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
         num_training_steps=total_train_steps
     )
     trainer = Trainer(model, optimizer, lr_scheduler, rank, world_size)
-    trainer.training_loop(train_dl, val_dl, cfg.epochs)
+    results = trainer.training_loop(train_dl, val_dl, test_dl, cfg.epochs)
+    if rank == 0:
+        print("Time taken for training loop:", results["time"])
 
     # Cleanup in the distributed case.
     if world_size > 1:

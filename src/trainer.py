@@ -29,9 +29,11 @@ class Trainer:
         self.print_freq = 100
         self.step = 0
 
+    @timer
     def training_loop(self,
                       train_dl: DataLoader,
                       val_dl: DataLoader,
+                      test_dl: DataLoader,
                       epochs: int
                       ):
         """Training Loop that runs for desired number of epochs."""
@@ -57,6 +59,13 @@ class Trainer:
         states = self.model.state_dict()
         if self.rank == 0:
             torch.save(states, "gpt2-finetuned.pt")
+        # Evaluate on test set
+        test_metrics = self.evaluate(test_dl)
+        if self.rank == 0:
+            print("Test:", test_metrics)
+            for k, v in test_metrics.items():
+                wandb.run.summary[f"test_{k}"] = v
+        return test_metrics
 
     @timer
     def train(self, train_dl: DataLoader, epoch: int = 0):
