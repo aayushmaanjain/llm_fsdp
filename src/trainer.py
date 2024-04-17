@@ -51,6 +51,12 @@ class Trainer:
             if self.rank == 0:
                 print("Validation:", val_metrics)
                 wandb.log({"train": train_metrics, "val": val_metrics, "epoch": i+1})
+        # Save final model
+        if self.world_size > 1:
+            dist.barrier()
+        states = self.model.state_dict()
+        if self.rank == 0:
+            torch.save(states, "gpt2-finetuned.pt")
 
     @timer
     def train(self, train_dl: DataLoader, epoch: int = 0):
