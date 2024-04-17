@@ -1,27 +1,32 @@
 """Module providing code for training models."""
-from typing import Any, Dict, Optional, Union
+from typing import Optional
 
 import evaluate
 import torch
 from torch.utils.data import DataLoader
+import torch.distributed as dist
 import wandb
 
 from utils import timer
 
 class Trainer:
     """Trainer"""
+
     def __init__(self,
                  model: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
                  lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler],
+                 rank: int = 0,
+                 world_size: int = 1
                  ) -> None:
         self.model = model
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
-        self.device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-        self.metrics: Dict[str, Any] = {}
+        self.device = torch.device(f"cuda:{torch.cuda.current_device()}") \
+                      if torch.cuda.is_available() else torch.device("cpu")
+        self.rank = rank
+        self.world_size = world_size
         self.print_freq = 100
-
         self.step = 0
 
     def training_loop(self,
@@ -35,11 +40,13 @@ class Trainer:
         self.model = self.model.to(self.device)
         for i in range(epochs):
             train_metrics = self.train(train_dl, i+1)
-            print(f"Epoch {i+1}")
-            print("Train", train_metrics)
+            if self.rank == 0:
+                print(f"Epoch {i+1}")
+                print("Train", train_metrics)
             val_metrics = self.evaluate(val_dl)
-            print("Validation:", val_metrics)
-            wandb.log({"train": train_metrics, "val": val_metrics, "epoch": i+1})
+            if self.rank == 0:
+                print("Validation:", val_metrics)
+                wandb.log({"train": train_metrics, "val": val_metrics, "epoch": i+1})
 
     @timer
     def train(self, train_dl: DataLoader, epoch: int = 0):
@@ -57,16 +64,21 @@ class Trainer:
             if self.lr_scheduler:
                 self.lr_scheduler.step()
             # Log and update progress
-            wandb.log({"train": {"batch_loss": loss.item()}}, step=self.step)
+            if self.rank == 0:
+                wandb.log({"train": {"batch_loss": loss.item()}}, step=self.step)
             self.step += 1
-            if step % self.print_freq == 0:
+            if self.rank == 0 and step % self.print_freq == 0:
                 print(f"Epoch {epoch:02}::{step}/{len(train_dl)}: Loss{loss.item()}")
         train_loss /= len(train_dl)
+        if self.world_size > 1:
+            dist.all_reduce(train_loss, op=dist.ReduceOp.AVG)
         return {'loss': train_loss.item()}
 
     @timer
     def evaluate(self, val_dl: DataLoader):
         """Evaluate."""
+        # TODO: distributed evaluate metrics? It seems like evaluate implicitly handles
+        # distributed evaluation. Revisit later to confirm.
         accmetric = evaluate.load("accuracy", module_type="metric")
         # TODO add perplexity and other metrics?
         # perpmetric = evaluate.load("perplexity", module_type="metric")
@@ -83,6 +95,8 @@ class Trainer:
                     references=torch.flatten(batch["labels"].type(torch.int32))
                 )
         val_loss /= len(val_dl)
+        if self.world_size > 1:
+            dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
         return {
             "accuracy": accmetric.compute()['accuracy'],
             "loss": val_loss.item(),

@@ -1,44 +1,69 @@
 """Script to finetune LLM models."""
+from functools import partial
+import os
+import warnings
+
 from datasets import load_dataset
 import hydra
 from omegaconf import DictConfig, OmegaConf
+import torch
+import torch.distributed as dist
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+)
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+import torch.multiprocessing as mp
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from transformers import (
     AutoTokenizer,
     GPT2LMHeadModel,
     DataCollatorForLanguageModeling,
     get_scheduler,
 )
+from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 import wandb
 
 from trainer import Trainer
 
 
-@hydra.main(config_path="../configs", config_name="config.yaml")
-def main(cfg: DictConfig) -> None:
-    """Main function."""
-    # Only run for supported models
-    assert cfg.model in set(["gpt2", "gpt2-large"]), "Model type not supported."
+def setup(rank: int, world_size: int):
+    """Initialize distributed group."""
+    os.environ['MASTER_ADDR'] = "localhost"
+    os.environ['MASTER_PORT'] = "12355"
+    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
 
-    # Initialize wandb
-    wandb.init(
-        project="llm-fsdp",
-        entity="aayushmaan",
-        config=OmegaConf.to_container(cfg, resolve=True),
-    )
-    wandb.define_metric("epoch")
+
+def cleanup():
+    """Close distributed group."""
+    dist.destroy_process_group()
+
+
+def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
+    """Function to fine-tune LLMs that supports FSDP as well."""
+    if world_size > 1:
+        setup(rank, world_size)
+
+    if rank == 0:
+        # Initialize wandb
+        wandb.init(
+            project="llm-fsdp",
+            entity="aayushmaan",
+            config=OmegaConf.to_container(cfg, resolve=True),
+        )
+        wandb.define_metric("epoch")
+        wandb.config.world_size = world_size
 
     # Load Model and Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(f"openai-community/{cfg.model}")
     model = GPT2LMHeadModel.from_pretrained(f"openai-community/{cfg.model}")
-    print(model)
-    print(f"#parameters = {model.num_parameters() / 1e6} million")
-    wandb.run.summary["parameters"] = model.num_parameters()
+    if rank == 0:
+        print(model)
+        print(f"#parameters = {model.num_parameters() / 1e6} million")
+        wandb.run.summary["parameters"] = model.num_parameters()
 
-    # block_size = tokenizer.model_max_length
-    block_size = int(tokenizer.model_max_length /
-                     cfg.block_factor)  # TODO: change
+    block_size = int(tokenizer.model_max_length / cfg.block_factor)
 
     def tokenize_function(examples):
         return tokenizer(examples["text"])
@@ -60,9 +85,14 @@ def main(cfg: DictConfig) -> None:
         result["labels"] = result["input_ids"].copy()
         return result
 
+    # TODO change dataset to wikitext-103-v1.
     dataset = load_dataset("wikitext", "wikitext-2-v1")
-    print((f"Dataset #samples: train={dataset['train'].num_rows},"
-           f"val={dataset['validation'].num_rows}, test={dataset['test'].num_rows}"))
+    if rank == 0:
+        print((
+            f"Dataset #samples: train={dataset['train'].num_rows},"
+            f"val={dataset['validation'].num_rows}, test={dataset['test'].num_rows}"))
+
+    # Preprocess the dataset
     tokenized_datasets = dataset.map(
         tokenize_function, batched=True, remove_columns=["text"])
     lm_datasets = tokenized_datasets.map(
@@ -72,33 +102,84 @@ def main(cfg: DictConfig) -> None:
     )
     train_dataset = lm_datasets['train']
     val_dataset = lm_datasets['validation']
-    print(f"Dataset size: train={len(train_dataset)}, val: {len(val_dataset)}")
+    if rank == 0:
+        print(f"Dataset size: train={len(train_dataset)}, val: {len(val_dataset)}")
 
     # Dataloaders
     # NOTE: tokenizer does not have a pad token.
     tokenizer.pad_token = tokenizer.eos_token
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer, mlm=False)
+    if world_size > 1:
+        # We shuffle in the sampler instead in the distributed case.
+        dl_shuffle = False
+        train_sampler = DistributedSampler(
+            train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
+        val_sampler = DistributedSampler(
+            val_dataset, rank=rank, num_replicas=world_size)
+        per_gpu_batchsize = cfg.batchsize // world_size
+    else:
+        dl_shuffle = True
+        train_sampler = None
+        val_sampler = None
+        per_gpu_batchsize = cfg.batchsize
+    # Update effective batchsize.
+    if cfg.batchsize % world_size != 0:
+        warnings.warn((
+            f"Batchsize {cfg.batchsize} cannot be divided equally between {world_size} processes."
+            f"Effective batchsize = {per_gpu_batchsize * world_size}"))
+        if rank == 0:
+            wandb.config.batch_size = per_gpu_batchsize * world_size
+
     dataloader_kwargs = {
-        'batch_size': cfg.batchsize,
-        'collate_fn': data_collator,
+        'batch_size': per_gpu_batchsize,
+        'collate_fn': DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False),
         'pin_memory': True,
     }
-    train_dl = DataLoader(train_dataset, shuffle=True, **dataloader_kwargs)
-    val_dl = DataLoader(val_dataset, **dataloader_kwargs)
+    train_dl = DataLoader(train_dataset, shuffle=dl_shuffle,
+                          sampler=train_sampler, **dataloader_kwargs)
+    val_dl = DataLoader(val_dataset, sampler=val_sampler, **dataloader_kwargs)
     total_train_steps = cfg.epochs * len(train_dl)
-    wandb.run.summary["total_train_steps"] = total_train_steps
+    if rank == 0:
+        wandb.run.summary["total_train_steps"] = total_train_steps
+
+    # FSDP model
+    if world_size > 1:
+        torch.cuda.set_device(rank)
+        gpt2_auto_wrap_policy = partial(
+            transformer_auto_wrap_policy, transformer_layer_cls={GPT2Block})
+        model = FSDP(model, auto_wrap_policy=gpt2_auto_wrap_policy,
+                     device_id=torch.cuda.current_device())
 
     # Optimizer and LR Scheduler
-    optimizer = AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
+    optimizer = AdamW(model.parameters(), lr=cfg.learning_rate,
+                      weight_decay=cfg.weight_decay)
     lr_scheduler = get_scheduler(
         "linear",
         optimizer=optimizer,
         num_warmup_steps=cfg.num_warmup_steps,
         num_training_steps=total_train_steps
     )
-    trainer = Trainer(model, optimizer, lr_scheduler)
+    trainer = Trainer(model, optimizer, lr_scheduler, rank, world_size)
     trainer.training_loop(train_dl, val_dl, cfg.epochs)
+
+    # Cleanup in the distributed case.
+    if world_size > 1:
+        cleanup()
+
+
+@hydra.main(config_path="../configs", config_name="config.yaml")
+def main(cfg: DictConfig) -> None:
+    """Main function."""
+    # Only run for supported models
+    assert cfg.model in set(["gpt2", "gpt2-large"]), "Model type not supported."
+
+    # Distributed Training
+    # NOTE: currently auto-scales to number of available GPUs.
+    num_gpus = torch.cuda.device_count()
+    if cfg.enable_fsdp and num_gpus > 1:
+        print(f"Running FSDP on {num_gpus} GPUs.")
+        mp.spawn(fsdp_main, args=(num_gpus, cfg), nprocs=num_gpus, join=True)
+    else:
+        fsdp_main(0, 1, cfg)
 
 
 if __name__ == "__main__":
