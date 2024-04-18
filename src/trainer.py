@@ -4,6 +4,7 @@ from typing import Optional
 import evaluate
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
 import wandb
 
@@ -71,6 +72,10 @@ class Trainer:
         """Trains model for one epoch."""
         train_loss = torch.tensor(0.).to(self.device)
         self.model.train()
+        # Set epoch for distributed sampler
+        if isinstance(train_dl.sampler, DistributedSampler):
+            train_dl.sampler.set_epoch(epoch)
+        # Iterate over batches.
         for step, batch in enumerate(train_dl, start=1):
             self.optimizer.zero_grad()
             batch = {k: v.to(self.device) for k, v in batch.items()}
