@@ -145,13 +145,16 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
     if rank == 0:
         wandb.run.summary["total_train_steps"] = total_train_steps
 
+    # Send model to device.
+    torch.cuda.set_device(rank)
     # FSDP model
     if world_size > 1:
-        torch.cuda.set_device(rank)
         gpt2_auto_wrap_policy = partial(
             transformer_auto_wrap_policy, transformer_layer_cls={GPT2Block})
         model = FSDP(model, auto_wrap_policy=gpt2_auto_wrap_policy,
                      device_id=torch.cuda.current_device())
+    else:
+        model = model.to("cuda")
 
     # Optimizer and LR Scheduler
     optimizer = AdamW(model.parameters(), lr=cfg.learning_rate,

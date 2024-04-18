@@ -37,7 +37,6 @@ class Trainer:
                       epochs: int
                       ):
         """Training Loop that runs for desired number of epochs."""
-        self.model = self.model.to(self.device)
         # Evaluate pretrained model on validation set to set baseline.
         val_metrics = self.evaluate(val_dl)
         if self.rank == 0:
