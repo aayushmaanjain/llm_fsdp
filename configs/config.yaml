@@ -8,3 +8,4 @@ weight_decay: 0.0
 lr_scheduler: "linear"
 num_warmup_steps: 0
 enable_fsdp: True
+enable_gradient_checkpointing:  True

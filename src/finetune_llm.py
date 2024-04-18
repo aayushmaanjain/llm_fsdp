@@ -58,6 +58,10 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
     # Load Model and Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(cfg.model)
     model = GPT2LMHeadModel.from_pretrained(cfg.model)
+    # Enable gradient checkpointing if specified.
+    if cfg.enable_gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+        model.config.use_cache = False
     if rank == 0:
         print(model)
         print(f"#parameters = {model.num_parameters() / 1e6} million")
