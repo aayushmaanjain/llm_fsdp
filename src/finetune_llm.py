@@ -85,7 +85,9 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
         result["labels"] = result["input_ids"].copy()
         return result
 
-    dataset = load_dataset("wikitext", "wikitext-103-v1")
+    # TODO: extend cfg specification to all datasets (beyond wikitext).
+    # Will need to handle tuple/ str cases.
+    dataset = load_dataset("wikitext", cfg.wikitext_dataset)
     if rank == 0:
         print((
             f"Dataset #samples: train={dataset['train'].num_rows},"
