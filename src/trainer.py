@@ -34,8 +34,8 @@ class Trainer:
     def training_loop(self,
                       train_dl: DataLoader,
                       val_dl: DataLoader,
-                      test_dl: DataLoader,
-                      epochs: int
+                      test_dl: Optional[DataLoader] = None,
+                      epochs: int = 1
                       ):
         """Training Loop that runs for desired number of epochs."""
         # Evaluate pretrained model on validation set to set baseline.
@@ -60,11 +60,13 @@ class Trainer:
         if self.rank == 0:
             torch.save(states, "gpt2-finetuned.pt")
         # Evaluate on test set
-        test_metrics = self.evaluate(test_dl)
-        if self.rank == 0:
-            print("Test:", test_metrics)
-            for k, v in test_metrics.items():
-                wandb.run.summary[f"test_{k}"] = v
+        test_metrics = {}
+        if test_dl is not None:
+            test_metrics.update(self.evaluate(test_dl))
+            if self.rank == 0:
+                print("Test:", test_metrics)
+                for k, v in test_metrics.items():
+                    wandb.run.summary[f"test_{k}"] = v
         return test_metrics
 
     @timer
