@@ -53,12 +53,7 @@ class Trainer:
             if self.rank == 0:
                 print("Validation:", val_metrics)
                 wandb.log({"train": train_metrics, "val": val_metrics, "epoch": i+1})
-        # Save final model
-        if self.world_size > 1:
-            dist.barrier()
-        states = self.model.state_dict()
-        if self.rank == 0:
-            torch.save(states, "gpt2-finetuned.pt")
+
         # Evaluate on test set
         test_metrics = {}
         if test_dl is not None:
@@ -67,6 +62,14 @@ class Trainer:
                 print("Test:", test_metrics)
                 for k, v in test_metrics.items():
                     wandb.run.summary[f"test_{k}"] = v
+
+        # Save final model
+        if self.world_size > 1:
+            dist.barrier()
+        states = self.model.state_dict()
+        if self.rank == 0:
+            torch.save(states, "gpt2-finetuned.pt")
+
         return test_metrics
 
     @timer
