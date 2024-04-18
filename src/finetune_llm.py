@@ -117,7 +117,6 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
     tokenizer.pad_token = tokenizer.eos_token
     if world_size > 1:
         # We shuffle in the sampler instead in the distributed case.
-        dl_shuffle = False
         train_sampler = DistributedSampler(
             train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
         val_sampler = DistributedSampler(
@@ -126,7 +125,6 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
             test_dataset, rank=rank, num_replicas=world_size)
         per_gpu_batchsize = cfg.batchsize // world_size
     else:
-        dl_shuffle = True
         train_sampler, val_sampler, test_sampler = None, None, None
         per_gpu_batchsize = cfg.batchsize
     # Update effective batchsize.
@@ -143,7 +141,7 @@ def fsdp_main(rank: int, world_size: int, cfg: DictConfig):
         'collate_fn': DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False),
         'pin_memory': True,
     }
-    train_dl = DataLoader(train_dataset, shuffle=dl_shuffle,
+    train_dl = DataLoader(train_dataset, shuffle=(train_sampler is None),
                           sampler=train_sampler, **dataloader_kwargs)
     val_dl = DataLoader(val_dataset, sampler=val_sampler, **dataloader_kwargs)
     test_dl = DataLoader(test_dataset, sampler=test_sampler, **dataloader_kwargs)
