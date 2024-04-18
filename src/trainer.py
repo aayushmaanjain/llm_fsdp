@@ -8,7 +8,7 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
 import wandb
 
-from utils import timer
+from utils import timer, free_cuda_memory
 
 class Trainer:
     """Trainer"""
@@ -46,10 +46,16 @@ class Trainer:
         # Run training
         for i in range(epochs):
             train_metrics = self.train(train_dl, i+1)
+            # NOTE: Done to avoid getting OOM during validation.
+            # TODO: investigate why OOM is happening.
+            free_cuda_memory()
             if self.rank == 0:
                 print(f"Epoch {i+1}")
                 print("Train", train_metrics)
             val_metrics = self.evaluate(val_dl)
+            # NOTE: Done to avoid getting OOM during training in the next epoch.
+            # TODO: investigate why OOM is happening.
+            free_cuda_memory()
             if self.rank == 0:
                 print("Validation:", val_metrics)
                 wandb.log({"train": train_metrics, "val": val_metrics, "epoch": i+1})
