@@ -1,6 +1,6 @@
 model: "gpt2"
 wikitext_dataset: "wikitext-103-v1"
-batchsize: 24
+batchsize: 128
 block_factor: 2
 epochs: 2
 learning_rate: 5e-4

@@ -22,8 +22,8 @@ python src/finetune_llm.py
 7. Use fine-tuned model for text generation by specifying the model checkpoint and prompts in the [Text Generation notebook](notebooks/generate_samples.ipynb).
 
 ## Features
-- For GPT2 (144M parameters), this supports batch size = 8 with single GPU setup.
-- GPT2 (144M) training can be scaled to batch size = 40 on 4x Nvidia T4 GPU systems with 16GB VRAM each. Tested on g4dn.12x large EC2 instance.
+- For GPT2 (144M parameters), this supports batch size = 8 with single GPU setup (without activation checkpointing).
+- GPT2 (144M) training can be scaled to batch size = 128 (32 per GPU) on 4x Nvidia T4 GPU systems with 16GB VRAM each with activation checkpointing [`enable_gradient_checkpointing=True`]. Without activation checkpointing, we achieve a global batch size of 40 (10 per GPU) on the same system. Tested on g4dn.12x large EC2 instance.
 - We use FSDP to scale to multiple GPUs and support a larger training batch size. The user only needs to specify `enable_fsdp=True` to enable FSDP and automatically scale to all available GPUs.
 - This repo does not use huggingface's Trainer and Accelerate modules but rather implements its own's [Trainer](src/trainer.py) class. This was done to develop a deeper understanding by using torch-native FSDP.
 - For evaluation metrics, we implement loss and perplexity ourselves and use HuggingFace's evaluate module to compute `accuracy`. This was done to understand how the implementation of the two approaches differ when used with FSDP.
